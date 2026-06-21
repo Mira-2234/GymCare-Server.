@@ -861,9 +861,8 @@ async function run() {
       }
     });
 
-    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    // ADMIN — TRAINER APPLICATIONS
-    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // TRAINER APPLICATIONS
+   
     app.get("/api/admin/trainer-applications", verifyAdmin, async (req, res) => {
       try {
         const status = req.query.status;
