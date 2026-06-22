@@ -5,13 +5,9 @@ require("dotenv").config();
 
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const Stripe = require("stripe");
-const multer = require("multer");
-const axios = require("axios");
-const FormData = require("form-data");
 
 const app = express();
 const port = process.env.PORT || 5000;
-
 const stripe = Stripe(process.env.STRIPE_SECRET);
 
 app.use(
@@ -20,11 +16,9 @@ app.use(
     credentials: true,
   })
 );
-
 app.use(express.json());
 app.use(cookieParser());
 
-// ───── DB ─────
 const uri = process.env.MONGO_DB_URI;
 
 const client = new MongoClient(uri, {
@@ -35,10 +29,6 @@ const client = new MongoClient(uri, {
   },
 });
 
-
-
-
-// ───── MAIN RUN ─────
 async function run() {
   try {
     await client.connect();
@@ -53,27 +43,30 @@ async function run() {
     const forumPostsCollection = db.collection("forumPosts");
     const commentsCollection = db.collection("comments");
     const trainerApplicationsCollection = db.collection("trainerApplications");
-    
 
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // HELPERS
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     const verifyAdmin = async (req, res, next) => {
       try {
         const email = req.query.email || req.body.userEmail;
-
-        if (!email) {
-          return res.status(401).send({ error: "Unauthorized: No email provided." });
-        }
+        if (!email) return res.status(401).send({ error: "Unauthorized: No email provided." });
 
         const user = await usersCollection.findOne({ email });
-
         if (!user || user.role !== "admin") {
           return res.status(403).send({ error: "Forbidden: Admin access required." });
         }
-
         next();
       } catch (error) {
         console.error("verifyAdmin error:", error);
         res.status(500).send({ error: "Failed to verify admin." });
       }
+    };
+
+    // Soft block check — blocked user action prevent korar jonno
+    const checkBlocked = async (email) => {
+      const user = await usersCollection.findOne({ email });
+      return user?.status === "Blocked";
     };
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -113,7 +106,6 @@ async function run() {
         if (!ObjectId.isValid(req.params.id)) {
           return res.status(400).send({ message: "Invalid class ID." });
         }
-
         const cls = await classesCollection.findOne({ _id: new ObjectId(req.params.id) });
         if (!cls) return res.status(404).send({ message: "Class not found." });
         res.send(cls);
@@ -124,7 +116,7 @@ async function run() {
     });
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    // FORUM ROUTES (Public + Private detail/vote/comment)
+    // FORUM ROUTES
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     app.get("/forum-posts", async (req, res) => {
       try {
@@ -133,7 +125,6 @@ async function run() {
         const skip = (page - 1) * limit;
 
         const totalCount = await forumPostsCollection.countDocuments();
-
         const posts = await forumPostsCollection
           .find()
           .sort({ createdAt: -1 })
@@ -163,7 +154,6 @@ async function run() {
           .sort({ createdAt: -1 })
           .limit(4)
           .toArray();
-
         res.send({ posts });
       } catch (error) {
         console.error("GET /forum-posts/latest error:", error);
@@ -171,7 +161,6 @@ async function run() {
       }
     });
 
-    // forum-posts 
     app.post("/forum-posts", async (req, res) => {
       try {
         const { title, image, description, authorName, authorEmail, authorRole } = req.body;
@@ -193,7 +182,6 @@ async function run() {
         };
 
         const result = await forumPostsCollection.insertOne(post);
-
         res.status(201).send({ success: true, post: { ...post, _id: result.insertedId } });
       } catch (error) {
         console.error("POST /forum-posts error:", error);
@@ -210,7 +198,6 @@ async function run() {
           .find({ authorEmail })
           .sort({ createdAt: -1 })
           .toArray();
-
         res.send(posts);
       } catch (error) {
         console.error("GET /forum-posts/my error:", error);
@@ -221,13 +208,10 @@ async function run() {
     app.get("/forum-posts/:id", async (req, res) => {
       try {
         const id = req.params.id;
-        if (!ObjectId.isValid(id)) {
-          return res.status(400).send({ error: "Invalid post ID" });
-        }
+        if (!ObjectId.isValid(id)) return res.status(400).send({ error: "Invalid post ID" });
 
         const post = await forumPostsCollection.findOne({ _id: new ObjectId(id) });
         if (!post) return res.status(404).send({ error: "Post not found" });
-
         res.send(post);
       } catch (error) {
         console.error("GET /forum-posts/:id error:", error);
@@ -240,9 +224,7 @@ async function run() {
         const { id } = req.params;
         const { authorEmail } = req.query;
 
-        if (!ObjectId.isValid(id)) {
-          return res.status(400).send({ error: "Invalid post ID" });
-        }
+        if (!ObjectId.isValid(id)) return res.status(400).send({ error: "Invalid post ID" });
 
         const post = await forumPostsCollection.findOne({ _id: new ObjectId(id) });
         if (!post) return res.status(404).send({ error: "Post not found." });
@@ -264,9 +246,7 @@ async function run() {
         const { id } = req.params;
         const { userEmail, voteType } = req.body;
 
-        if (!ObjectId.isValid(id)) {
-          return res.status(400).send({ error: "Invalid post ID" });
-        }
+        if (!ObjectId.isValid(id)) return res.status(400).send({ error: "Invalid post ID" });
         if (!userEmail || !["like", "dislike"].includes(voteType)) {
           return res.status(400).send({ error: "Invalid vote request" });
         }
@@ -317,7 +297,6 @@ async function run() {
           .find({ postId: req.params.postId })
           .sort({ createdAt: -1 })
           .toArray();
-
         res.send({ comments });
       } catch (error) {
         console.error("GET /comments/:postId error:", error);
@@ -325,12 +304,18 @@ async function run() {
       }
     });
 
+    // ── Block check: blocked user comment dite parbe na ──
     app.post("/comments", async (req, res) => {
       try {
         const { postId, userEmail, userName, userImage, text } = req.body;
 
         if (!postId || !userEmail || !text?.trim()) {
           return res.status(400).send({ error: "Missing fields" });
+        }
+
+        const blocked = await checkBlocked(userEmail);
+        if (blocked) {
+          return res.status(403).send({ error: "Action restricted by Admin." });
         }
 
         const comment = {
@@ -355,9 +340,7 @@ async function run() {
         const { id } = req.params;
         const { userEmail, text } = req.body;
 
-        if (!ObjectId.isValid(id)) {
-          return res.status(400).send({ error: "Invalid comment ID" });
-        }
+        if (!ObjectId.isValid(id)) return res.status(400).send({ error: "Invalid comment ID" });
 
         const comment = await commentsCollection.findOne({ _id: new ObjectId(id) });
         if (!comment) return res.status(404).send({ error: "Comment not found" });
@@ -370,7 +353,6 @@ async function run() {
           { _id: new ObjectId(id) },
           { $set: { text: text.trim(), editedAt: new Date() } }
         );
-
         res.send({ success: true });
       } catch (error) {
         console.error("PATCH /comments/:id error:", error);
@@ -383,9 +365,7 @@ async function run() {
         const { id } = req.params;
         const { userEmail } = req.query;
 
-        if (!ObjectId.isValid(id)) {
-          return res.status(400).send({ error: "Invalid comment ID" });
-        }
+        if (!ObjectId.isValid(id)) return res.status(400).send({ error: "Invalid comment ID" });
 
         const comment = await commentsCollection.findOne({ _id: new ObjectId(id) });
         if (!comment) return res.status(404).send({ error: "Comment not found" });
@@ -434,7 +414,6 @@ async function run() {
           .find({ attendeeEmail: userEmail })
           .sort({ bookedAt: -1 })
           .toArray();
-
         res.send({ bookings });
       } catch (error) {
         console.error("GET /bookings/my error:", error);
@@ -449,11 +428,7 @@ async function run() {
       try {
         const { classId, userEmail } = req.query;
 
-        const existingFavorite = await favoritesCollection.findOne({
-          classId: classId,
-          userEmail: userEmail,
-        });
-
+        const existingFavorite = await favoritesCollection.findOne({ classId, userEmail });
         res.send({
           isFavorite: !!existingFavorite,
           favoriteId: existingFavorite?._id ?? null,
@@ -469,9 +444,7 @@ async function run() {
         const { classId, userEmail, className, classImage } = req.body;
 
         const existing = await favoritesCollection.findOne({ classId, userEmail });
-        if (existing) {
-          return res.status(409).send({ error: "Already in favorites" });
-        }
+        if (existing) return res.status(409).send({ error: "Already in favorites" });
 
         const result = await favoritesCollection.insertOne({
           classId,
@@ -480,7 +453,6 @@ async function run() {
           classImage,
           createdAt: new Date(),
         });
-
         res.send({ success: true, insertedId: result.insertedId });
       } catch (error) {
         console.error("POST /favorites error:", error);
@@ -491,10 +463,7 @@ async function run() {
     app.delete("/favorites/:id", async (req, res) => {
       try {
         const id = req.params.id;
-
-        if (!ObjectId.isValid(id)) {
-          return res.status(400).send({ error: "Invalid favorite ID" });
-        }
+        if (!ObjectId.isValid(id)) return res.status(400).send({ error: "Invalid favorite ID" });
 
         await favoritesCollection.deleteOne({ _id: new ObjectId(id) });
         res.send({ success: true });
@@ -513,7 +482,6 @@ async function run() {
           .find({ userEmail })
           .sort({ createdAt: -1 })
           .toArray();
-
         res.send({ favorites });
       } catch (error) {
         console.error("GET /favorites/my error:", error);
@@ -533,7 +501,6 @@ async function run() {
           bookingsCollection.countDocuments({ attendeeEmail: userEmail }),
           favoritesCollection.countDocuments({ userEmail }),
         ]);
-
         res.send({ bookedCount, favoritesCount });
       } catch (error) {
         console.error("GET /dashboard/user-stats error:", error);
@@ -542,7 +509,7 @@ async function run() {
     });
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    // TRAINER APPLICATIONS (User-facing)
+    // TRAINER APPLICATIONS
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     app.get("/trainer-applications/my", async (req, res) => {
       try {
@@ -554,7 +521,6 @@ async function run() {
           .sort({ appliedAt: -1 })
           .limit(1)
           .toArray();
-
         res.send({ application: application[0] || null });
       } catch (error) {
         console.error("GET /trainer-applications/my error:", error);
@@ -562,12 +528,18 @@ async function run() {
       }
     });
 
+    // ── Block check: blocked user apply dite parbe na ──
     app.post("/trainer-applications", async (req, res) => {
       try {
         const { userEmail, userName, experience, specialty, bio } = req.body;
 
         if (!userEmail || !experience || !specialty) {
           return res.status(400).send({ error: "Missing required fields" });
+        }
+
+        const blocked = await checkBlocked(userEmail);
+        if (blocked) {
+          return res.status(403).send({ error: "Action restricted by Admin." });
         }
 
         const existingPending = await trainerApplicationsCollection.findOne({
@@ -588,7 +560,6 @@ async function run() {
           feedback: null,
           appliedAt: new Date(),
         });
-
         res.status(201).send({ success: true, insertedId: result.insertedId });
       } catch (error) {
         console.error("POST /trainer-applications error:", error);
@@ -599,6 +570,8 @@ async function run() {
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     // PAYMENT / STRIPE ROUTES
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+    // ── Block check: blocked user booking dite parbe na ──
     app.post("/create-checkout-session", async (req, res) => {
       try {
         const { classId, userEmail } = req.body;
@@ -607,19 +580,21 @@ async function run() {
           return res.status(400).send({ error: "Invalid class ID" });
         }
 
+        const blocked = await checkBlocked(userEmail);
+        if (blocked) {
+          return res.status(403).send({ error: "Action restricted by Admin." });
+        }
+
         const existingBooking = await bookingsCollection.findOne({
           classId: classId,
           attendeeEmail: userEmail,
         });
-
         if (existingBooking) {
           return res.status(409).send({ error: "You have already booked this class." });
         }
 
         const cls = await classesCollection.findOne({ _id: new ObjectId(classId) });
-        if (!cls) {
-          return res.status(404).send({ error: "Class not found." });
-        }
+        if (!cls) return res.status(404).send({ error: "Class not found." });
 
         const session = await stripe.checkout.sessions.create({
           payment_method_types: ["card"],
@@ -637,10 +612,7 @@ async function run() {
               quantity: 1,
             },
           ],
-          metadata: {
-            classId: classId,
-            userEmail: userEmail,
-          },
+          metadata: { classId, userEmail },
           success_url: `${process.env.CLIENT_URL}/payment/success?session_id={CHECKOUT_SESSION_ID}`,
           cancel_url: `${process.env.CLIENT_URL}/classes/${classId}`,
         });
@@ -655,7 +627,6 @@ async function run() {
     app.get("/verify-payment/:sessionId", async (req, res) => {
       try {
         const { sessionId } = req.params;
-
         const session = await stripe.checkout.sessions.retrieve(sessionId);
 
         if (session.payment_status !== "paid") {
@@ -668,7 +639,6 @@ async function run() {
           classId,
           attendeeEmail: userEmail,
         });
-
         if (existingBooking) {
           return res.send({ success: true, booking: existingBooking, alreadyExisted: true });
         }
@@ -717,7 +687,7 @@ async function run() {
     });
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    // ADMIN — STATS (Overview chart + counts)
+    // ADMIN — STATS
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     app.get("/api/admin/stats", verifyAdmin, async (req, res) => {
       try {
@@ -774,10 +744,7 @@ async function run() {
         const { id } = req.params;
         const { role } = req.body;
 
-        if (!ObjectId.isValid(id)) {
-          return res.status(400).send({ error: "Invalid user ID" });
-        }
-
+        if (!ObjectId.isValid(id)) return res.status(400).send({ error: "Invalid user ID" });
         if (!["admin", "trainer", "user"].includes(role)) {
           return res.status(400).send({ error: "Invalid role" });
         }
@@ -786,7 +753,6 @@ async function run() {
           { _id: new ObjectId(id) },
           { $set: { role } }
         );
-
         res.send({ success: true, modifiedCount: result.modifiedCount });
       } catch (error) {
         console.error("PATCH /api/admin/users/:id/role error:", error);
@@ -799,10 +765,7 @@ async function run() {
         const { id } = req.params;
         const { status } = req.body;
 
-        if (!ObjectId.isValid(id)) {
-          return res.status(400).send({ error: "Invalid user ID" });
-        }
-
+        if (!ObjectId.isValid(id)) return res.status(400).send({ error: "Invalid user ID" });
         if (!["Active", "Blocked"].includes(status)) {
           return res.status(400).send({ error: "Invalid status" });
         }
@@ -811,7 +774,6 @@ async function run() {
           { _id: new ObjectId(id) },
           { $set: { status } }
         );
-
         res.send({ success: true, modifiedCount: result.modifiedCount });
       } catch (error) {
         console.error("PATCH /api/admin/users/:id/status error:", error);
@@ -840,10 +802,7 @@ async function run() {
         const { id } = req.params;
         const { status } = req.body;
 
-        if (!ObjectId.isValid(id)) {
-          return res.status(400).send({ error: "Invalid class ID" });
-        }
-
+        if (!ObjectId.isValid(id)) return res.status(400).send({ error: "Invalid class ID" });
         if (!["Approved", "Rejected", "Pending"].includes(status)) {
           return res.status(400).send({ error: "Invalid status" });
         }
@@ -852,7 +811,6 @@ async function run() {
           { _id: new ObjectId(id) },
           { $set: { status } }
         );
-
         res.send({ success: true, modifiedCount: result.modifiedCount });
       } catch (error) {
         console.error("PATCH /api/admin/classes/:id/status error:", error);
@@ -863,10 +821,7 @@ async function run() {
     app.delete("/api/admin/classes/:id", verifyAdmin, async (req, res) => {
       try {
         const { id } = req.params;
-
-        if (!ObjectId.isValid(id)) {
-          return res.status(400).send({ error: "Invalid class ID" });
-        }
+        if (!ObjectId.isValid(id)) return res.status(400).send({ error: "Invalid class ID" });
 
         await classesCollection.deleteOne({ _id: new ObjectId(id) });
         res.send({ success: true });
@@ -876,8 +831,7 @@ async function run() {
       }
     });
 
-    // TRAINER APPLICATIONS
-   
+    
     app.get("/api/admin/trainer-applications", verifyAdmin, async (req, res) => {
       try {
         const status = req.query.status;
@@ -887,7 +841,6 @@ async function run() {
           .find(filter)
           .sort({ _id: -1 })
           .toArray();
-
         res.send(applications);
       } catch (error) {
         console.error("GET /api/admin/trainer-applications error:", error);
@@ -895,70 +848,104 @@ async function run() {
       }
     });
 
-    app.patch("/api/admin/trainer-applications/:id", verifyAdmin, async (req, res) => {
-      try {
-        const { id } = req.params;
-        const { status } = req.body;
+   app.patch("/api/admin/trainer-applications/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
 
-        if (!ObjectId.isValid(id)) {
-          return res.status(400).send({ error: "Invalid application ID" });
-        }
+    const {
+      status,
+      feedback,
+    } = req.body;
 
-        const application = await trainerApplicationsCollection.findOne({
+    const result =
+      await trainerApplicationsCollection.updateOne(
+        {
           _id: new ObjectId(id),
-        });
-        if (!application) {
-          return res.status(404).send({ error: "Application not found." });
+        },
+        {
+          $set: {
+            status,
+            feedback: status === "Rejected"
+              ? feedback
+              : "",
+
+            updatedAt: new Date(),
+          },
         }
+      );
 
-        await trainerApplicationsCollection.updateOne(
-          { _id: new ObjectId(id) },
-          { $set: { status } }
-        );
-
-        if (status === "Approved") {
-          await usersCollection.updateOne(
-            { email: application.userEmail },
-            { $set: { role: "trainer" } }
-          );
-        }
-
-        res.send({ success: true });
-      } catch (error) {
-        console.error("PATCH /api/admin/trainer-applications/:id error:", error);
-        res.status(500).send({ error: "Failed to update application." });
-      }
+    res.send({
+      success: true,
+      modifiedCount: result.modifiedCount,
     });
+  } catch (err) {
+    res.status(500).send({
+      success: false,
+    });
+  }
+});
 
-    // TRAINERS
     
-    app.get("/api/admin/trainers", verifyAdmin, async (req, res) => {
-      try {
-        const trainers = await usersCollection
-          .find({ role: "trainer" })
-          .sort({ createdAt: -1 })
-          .toArray();
+    app.get("/trainer-applications/my", async (req, res) => {
+  try {
+    const { userEmail } = req.query;
 
-        res.send(trainers);
-      } catch (error) {
-        console.error("GET /api/admin/trainers error:", error);
-        res.status(500).send({ error: "Failed to fetch trainers." });
-      }
+    if (!userEmail) {
+      return res.status(400).send({
+        success: false,
+        message: "userEmail required",
+      });
+    }
+
+    const application =
+      await trainerApplicationsCollection.findOne({
+        userEmail,
+      });
+
+    if (!application) {
+      return res.send({
+        success: true,
+        application: null,
+      });
+    }
+
+    res.send({
+      success: true,
+      application: {
+        _id: application._id,
+        userName: application.userName,
+        userEmail: application.userEmail,
+
+        specialty: application.specialty,
+        experience: application.experience,
+
+        status: application.status || "Pending",
+
+        // ← এটা add কর
+        feedback: application.feedback || "",
+
+        createdAt: application.createdAt,
+      },
     });
+  } catch (error) {
+    console.log(error);
+
+    res.status(500).send({
+      success: false,
+      message: "Failed to fetch application",
+    });
+  }
+});
 
     app.patch("/api/admin/trainers/:id/demote", verifyAdmin, async (req, res) => {
       try {
         const { id } = req.params;
-
-        if (!ObjectId.isValid(id)) {
-          return res.status(400).send({ error: "Invalid user ID" });
-        }
+        if (!ObjectId.isValid(id)) return res.status(400).send({ error: "Invalid user ID" });
 
         const result = await usersCollection.updateOne(
           { _id: new ObjectId(id) },
           { $set: { role: "user" } }
         );
-
         res.send({ success: true, modifiedCount: result.modifiedCount });
       } catch (error) {
         console.error("PATCH /api/admin/trainers/:id/demote error:", error);
@@ -966,16 +953,12 @@ async function run() {
       }
     });
 
-    
-    //  FORUM MODERATION
-  
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // ADMIN — FORUM MODERATION
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     app.get("/api/admin/forum-posts", verifyAdmin, async (req, res) => {
       try {
-        const posts = await forumPostsCollection
-          .find()
-          .sort({ createdAt: -1 })
-          .toArray();
-
+        const posts = await forumPostsCollection.find().sort({ createdAt: -1 }).toArray();
         res.send({ posts });
       } catch (error) {
         console.error("GET /api/admin/forum-posts error:", error);
@@ -986,14 +969,10 @@ async function run() {
     app.delete("/api/admin/forum-posts/:id", verifyAdmin, async (req, res) => {
       try {
         const { id } = req.params;
-
-        if (!ObjectId.isValid(id)) {
-          return res.status(400).send({ error: "Invalid post ID" });
-        }
+        if (!ObjectId.isValid(id)) return res.status(400).send({ error: "Invalid post ID" });
 
         await forumPostsCollection.deleteOne({ _id: new ObjectId(id) });
         await commentsCollection.deleteMany({ postId: id });
-
         res.send({ success: true });
       } catch (error) {
         console.error("DELETE /api/admin/forum-posts/:id error:", error);
@@ -1001,9 +980,9 @@ async function run() {
       }
     });
 
-  
-    // transactions 
-
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // ADMIN — TRANSACTIONS
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     app.get("/api/admin/transactions", verifyAdmin, async (req, res) => {
       try {
         const page = parseInt(req.query.page) || 1;
@@ -1033,6 +1012,9 @@ async function run() {
       }
     });
 
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // TRAINER ROUTES
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     app.get("/trainer/stats", async (req, res) => {
       try {
         const { trainerEmail } = req.query;
@@ -1045,10 +1027,7 @@ async function run() {
           classId: { $in: classIds },
         });
 
-        res.send({
-          totalClasses: myClasses.length,
-          totalStudents,
-        });
+        res.send({ totalClasses: myClasses.length, totalStudents });
       } catch (error) {
         console.error("GET /trainer/stats error:", error);
         res.status(500).send({ error: "Failed to fetch trainer stats." });
@@ -1091,7 +1070,6 @@ async function run() {
           .find({ trainerEmail })
           .sort({ createdAt: -1 })
           .toArray();
-
         res.send(classes);
       } catch (error) {
         console.error("GET /classes/my error:", error);
@@ -1104,9 +1082,7 @@ async function run() {
         const { id } = req.params;
         const { trainerEmail, ...updateFields } = req.body;
 
-        if (!ObjectId.isValid(id)) {
-          return res.status(400).send({ error: "Invalid class ID" });
-        }
+        if (!ObjectId.isValid(id)) return res.status(400).send({ error: "Invalid class ID" });
 
         const cls = await classesCollection.findOne({ _id: new ObjectId(id) });
         if (!cls) return res.status(404).send({ error: "Class not found." });
@@ -1130,9 +1106,7 @@ async function run() {
         const { id } = req.params;
         const { trainerEmail } = req.query;
 
-        if (!ObjectId.isValid(id)) {
-          return res.status(400).send({ error: "Invalid class ID" });
-        }
+        if (!ObjectId.isValid(id)) return res.status(400).send({ error: "Invalid class ID" });
 
         const cls = await classesCollection.findOne({ _id: new ObjectId(id) });
         if (!cls) return res.status(404).send({ error: "Class not found." });
@@ -1158,7 +1132,6 @@ async function run() {
           email: b.attendeeEmail,
           bookedAt: b.bookedAt,
         }));
-
         res.send({ attendees });
       } catch (error) {
         console.error("GET /classes/:id/attendees error:", error);
@@ -1171,7 +1144,6 @@ async function run() {
 }
 
 run();
-
 
 app.get("/", (req, res) => {
   res.send("Server running 🏋️");
