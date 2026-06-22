@@ -2,11 +2,16 @@ const express = require("express");
 const cors = require("cors");
 const cookieParser = require("cookie-parser");
 require("dotenv").config();
+
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const Stripe = require("stripe");
+const multer = require("multer");
+const axios = require("axios");
+const FormData = require("form-data");
 
 const app = express();
 const port = process.env.PORT || 5000;
+
 const stripe = Stripe(process.env.STRIPE_SECRET);
 
 app.use(
@@ -15,23 +20,32 @@ app.use(
     credentials: true,
   })
 );
+
 app.use(express.json());
 app.use(cookieParser());
 
+// ───── DB ─────
 const uri = process.env.MONGO_DB_URI;
 
 const client = new MongoClient(uri, {
-  serverApi: { version: ServerApiVersion.v1, strict: true, deprecationErrors: true },
+  serverApi: {
+    version: ServerApiVersion.v1,
+    strict: true,
+    deprecationErrors: true,
+  },
 });
 
+
+
+
+// ───── MAIN RUN ─────
 async function run() {
   try {
     await client.connect();
-    console.log("✅ Connected to MongoDB");
+    console.log("✅ MongoDB connected");
 
     const db = client.db("GymCare");
 
-    // ── Collections ──
     const usersCollection = db.collection("user");
     const classesCollection = db.collection("classes");
     const bookingsCollection = db.collection("bookings");
@@ -39,6 +53,7 @@ async function run() {
     const forumPostsCollection = db.collection("forumPosts");
     const commentsCollection = db.collection("comments");
     const trainerApplicationsCollection = db.collection("trainerApplications");
+    
 
     const verifyAdmin = async (req, res, next) => {
       try {
