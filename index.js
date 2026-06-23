@@ -5,7 +5,7 @@ require("dotenv").config();
 
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const Stripe = require("stripe");
-const jwt = require("jsonwebtoken"); // 🔴 JWT লাইব্রেরি
+const jwt = require("jsonwebtoken"); 
 
 const app = express();
 const port = process.env.PORT || 5000;
