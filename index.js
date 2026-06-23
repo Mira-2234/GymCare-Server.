@@ -842,7 +842,7 @@ app.get("/trainer/stats", async (req, res) => {
 
 
 
-// ── GET /notifications  —  User er shob notification ──────────────────
+
 app.get("/notifications", async (req, res) => {
   try {
     const { userEmail } = req.query;
@@ -863,7 +863,7 @@ app.get("/notifications", async (req, res) => {
   }
 });
 
-// ── PATCH /notifications/:id/read  —  Single notification read mark ───
+
 app.patch("/notifications/:id/read", async (req, res) => {
   try {
     const { id } = req.params;
@@ -880,7 +880,7 @@ app.patch("/notifications/:id/read", async (req, res) => {
   }
 });
 
-// ── PATCH /notifications/read-all  —  Shob notification read mark ─────
+
 app.patch("/notifications/read-all", async (req, res) => {
   try {
     const { userEmail } = req.body;
