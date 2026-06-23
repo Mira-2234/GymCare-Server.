@@ -44,6 +44,7 @@ async function run() {
     const forumPostsCollection = db.collection("forumPosts");
     const commentsCollection = db.collection("comments");
     const trainerApplicationsCollection = db.collection("trainerApplications");
+    const notificationsCollection = db.collection("notifications");
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     // HELPERS
@@ -567,21 +568,81 @@ async function run() {
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     // USER DASHBOARD STATS — 🔴 JWT protected
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    app.get("/dashboard/user-stats", verifyToken, async (req, res) => {
-      try {
-        const userEmail = req.decoded.email; // 🔴 query param এর বদলে token থেকে
+    // ━━ AFTER — fix kora version ━━
 
-        const [bookedCount, favoritesCount] = await Promise.all([
-          bookingsCollection.countDocuments({ attendeeEmail: userEmail }),
-          favoritesCollection.countDocuments({ userEmail }),
-        ]);
-        res.send({ bookedCount, favoritesCount });
-      } catch (error) {
-        console.error("GET /dashboard/user-stats error:", error);
-        res.status(500).send({ error: "Failed to fetch stats" });
-      }
+app.get("/dashboard/user-stats", async (req, res) => {
+  try {
+    const { userEmail } = req.query; // query param theke nao
+    if (!userEmail) return res.status(400).send({ error: "userEmail required" });
+
+    const [bookedCount, favoritesCount] = await Promise.all([
+      bookingsCollection.countDocuments({ attendeeEmail: userEmail }),
+      favoritesCollection.countDocuments({ userEmail }),
+    ]);
+    res.send({ bookedCount, favoritesCount });
+  } catch (error) {
+    console.error("GET /dashboard/user-stats error:", error);
+    res.status(500).send({ error: "Failed to fetch stats" });
+  }
+});
+
+app.get("/api/admin/stats", verifyAdmin, async (req, res) => {
+  // verifyToken, verifyRole remove — verifyAdmin e enough
+  try {
+    const [totalUsers, totalClasses, totalApprovedClasses, totalBookedClasses] =
+      await Promise.all([
+        usersCollection.countDocuments(),
+        classesCollection.countDocuments(),
+        classesCollection.countDocuments({ status: "Approved" }),
+        bookingsCollection.countDocuments(),
+      ]);
+
+    const classesByCategory = await classesCollection
+      .aggregate([
+        { $group: { _id: "$category", count: { $sum: 1 } } },
+        { $sort: { count: -1 } },
+      ])
+      .toArray();
+
+    const usersByRole = await usersCollection
+      .aggregate([
+        { $group: { _id: { $ifNull: ["$role", "user"] }, count: { $sum: 1 } } },
+      ])
+      .toArray();
+
+    res.send({
+      totalUsers,
+      totalClasses,
+      totalApprovedClasses,
+      totalBookedClasses,
+      classesByCategory: classesByCategory.map((c) => ({ category: c._id, count: c.count })),
+      usersByRole: usersByRole.map((u) => ({ role: u._id, count: u.count })),
+    });
+  } catch (error) {
+    console.error("GET /api/admin/stats error:", error);
+    res.status(500).send({ error: "Failed to fetch admin stats." });
+  }
+});
+
+app.get("/trainer/stats", async (req, res) => {
+  // verifyToken, verifyRole remove — query param use koro
+  try {
+    const { trainerEmail } = req.query;
+    if (!trainerEmail) return res.status(400).send({ error: "trainerEmail required" });
+
+    const myClasses = await classesCollection.find({ trainerEmail }).toArray();
+    const classIds = myClasses.map((c) => c._id.toString());
+
+    const totalStudents = await bookingsCollection.countDocuments({
+      classId: { $in: classIds },
     });
 
+    res.send({ totalClasses: myClasses.length, totalStudents });
+  } catch (error) {
+    console.error("GET /trainer/stats error:", error);
+    res.status(500).send({ error: "Failed to fetch trainer stats." });
+  }
+});
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     // TRAINER APPLICATIONS
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -756,6 +817,62 @@ async function run() {
         res.status(500).send({ error: "Failed to verify payment." });
       }
     });
+
+
+
+
+// ── GET /notifications  —  User er shob notification ──────────────────
+app.get("/notifications", async (req, res) => {
+  try {
+    const { userEmail } = req.query;
+    if (!userEmail) return res.status(400).send({ error: "userEmail required" });
+
+    const notifications = await notificationsCollection
+      .find({ userEmail })
+      .sort({ createdAt: -1 })
+      .limit(20)
+      .toArray();
+
+    res.send({ notifications });
+  } catch (error) {
+    console.error("GET /notifications error:", error);
+    res.status(500).send({ error: "Failed to fetch notifications." });
+  }
+});
+
+// ── PATCH /notifications/:id/read  —  Single notification read mark ───
+app.patch("/notifications/:id/read", async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!ObjectId.isValid(id)) return res.status(400).send({ error: "Invalid ID" });
+
+    await notificationsCollection.updateOne(
+      { _id: new ObjectId(id) },
+      { $set: { read: true } }
+    );
+    res.send({ success: true });
+  } catch (error) {
+    console.error("PATCH /notifications/:id/read error:", error);
+    res.status(500).send({ error: "Failed to mark notification as read." });
+  }
+});
+
+// ── PATCH /notifications/read-all  —  Shob notification read mark ─────
+app.patch("/notifications/read-all", async (req, res) => {
+  try {
+    const { userEmail } = req.body;
+    if (!userEmail) return res.status(400).send({ error: "userEmail required" });
+
+    await notificationsCollection.updateMany(
+      { userEmail, read: false },
+      { $set: { read: true } }
+    );
+    res.send({ success: true });
+  } catch (error) {
+    console.error("PATCH /notifications/read-all error:", error);
+    res.status(500).send({ error: "Failed to mark all as read." });
+  }
+});
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     // ADMIN — CHECK ROLE
@@ -951,41 +1068,68 @@ async function run() {
       }
     });
 
-    app.patch("/api/admin/trainer-applications/:id", verifyAdmin, async (req, res) => {
-      try {
-        const { id } = req.params;
-        const { status, feedback } = req.body;
+   app.patch("/api/admin/trainer-applications/:id", verifyAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, feedback } = req.body;
 
-        const result = await trainerApplicationsCollection.updateOne(
-          { _id: new ObjectId(id) },
-          {
-            $set: {
-              status,
-              feedback: status === "Rejected" ? feedback : "",
-              updatedAt: new Date(),
-            },
-          }
-        );
+    if (!ObjectId.isValid(id)) return res.status(400).send({ error: "Invalid application ID" });
 
-        // 🔴 Approve হলে user role trainer তে আপডেট হওয়া উচিত — আগের version এ মিসিং ছিল
-        if (status === "Approved") {
-          const application = await trainerApplicationsCollection.findOne({
-            _id: new ObjectId(id),
-          });
-          if (application) {
-            await usersCollection.updateOne(
-              { email: application.userEmail },
-              { $set: { role: "trainer" } }
-            );
-          }
-        }
-
-        res.send({ success: true, modifiedCount: result.modifiedCount });
-      } catch (err) {
-        console.error("PATCH /api/admin/trainer-applications/:id error:", err);
-        res.status(500).send({ success: false });
-      }
+    // Age application fetch koro — notification e userEmail lagbe
+    const application = await trainerApplicationsCollection.findOne({
+      _id: new ObjectId(id),
     });
+    if (!application) return res.status(404).send({ error: "Application not found." });
+
+    await trainerApplicationsCollection.updateOne(
+      { _id: new ObjectId(id) },
+      {
+        $set: {
+          status,
+          feedback: status === "Rejected" ? feedback : "",
+          updatedAt: new Date(),
+        },
+      }
+    );
+
+    if (status === "Approved") {
+      // User role trainer e update
+      await usersCollection.updateOne(
+        { email: application.userEmail },
+        { $set: { role: "trainer" } }
+      );
+
+      // Approval notification
+      await notificationsCollection.insertOne({
+        userEmail: application.userEmail,
+        type: "trainer_approved",
+        title: "Trainer Application Approved!",
+        message: "Congratulations! Your trainer application has been approved. You now have full trainer access.",
+        read: false,
+        createdAt: new Date(),
+      });
+    }
+
+    if (status === "Rejected") {
+      // Rejection notification
+      await notificationsCollection.insertOne({
+        userEmail: application.userEmail,
+        type: "trainer_rejected",
+        title: "Trainer Application Update",
+        message: feedback
+          ? `Your application was not approved. Admin feedback: "${feedback}"`
+          : "Your trainer application was not approved this time. You can apply again.",
+        read: false,
+        createdAt: new Date(),
+      });
+    }
+
+    res.send({ success: true });
+  } catch (err) {
+    console.error("PATCH /api/admin/trainer-applications/:id error:", err);
+    res.status(500).send({ success: false });
+  }
+});
 
     app.patch("/api/admin/trainers/:id/demote", verifyAdmin, async (req, res) => {
       try {
